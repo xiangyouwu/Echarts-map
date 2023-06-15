@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <!-- 这一步必须加，否则会出现请求阿里地图出现403，因为阿里做了访问限制 -->
+    <meta name="referrer" content="no-referrer" />
+
+    <title>Document</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+      }
+      #main {
+        margin: 50px auto;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="main" style="width: 1100px; height: 630px"></div>
+  </body>
+
+  <script src="./js/axios.min.js"></script>
+  <script src="./js/echarts.min.js"></script>
+  <script>
+    // 基于准备好的dom，初始化echarts实例
+    var myChart = echarts.init(document.getElementById("main"));
+
+    // 存储实例
+    let option = null;
+
+    // 存储省级区域
+    let sheng = null;
+    // 存储市区
+    let shi = null;
+    // 存储区
+    let qu = null;
+    // 存储点击的是否是县 0=省 1=市 2=区
+    let type = 0;
+
+    // 获取中国地图
+    axios
+      .get("https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json")
+      .then((chinaJson) => {
+        sheng = chinaJson.data;
+        initCharts(chinaJson.data);
+      });
+
+    // 地图实例
+    function initCharts(zhongguo) {
+      option = {
+        // 背景颜色
+        backgroundColor: "#00477f",
+        // 提示浮窗样式
+        tooltip: {
+          show: true,
+          trigger: "item",
+          alwaysShowContent: false,
+          backgroundColor: "#0C121C",
+          borderColor: "rgba(0, 0, 0, 0.16);",
+          hideDelay: 100,
+          triggerOn: "mousemove",
+          enterable: true,
+          textStyle: {
+            color: "#DADADA",
+            fontSize: "12",
+            width: 20,
+            height: 30,
+            overflow: "break",
+          },
+          showDelay: 100,
+        },
+        // 地图配置
+        geo: {
+          map: "china",
+          layoutCenter: ["50%", "50%"], //地图所在的位置
+          layoutSize: 600, //地图视图大小
+          roam: true, //开启地图缩放和移动
+          label: {
+            // 通常状态下的样式
+            normal: {
+              show: true,
+              textStyle: {
+                color: "#fff",
+              },
+            },
+            // 鼠标放上去的样式
+            emphasis: {
+              textStyle: {
+                color: "#fff",
+              },
+            },
+          },
+          // 地图区域的样式设置
+          itemStyle: {
+            normal: {
+              borderColor: "#addef8",
+              borderWidth: 1,
+              areaColor: {
+                type: "radial",
+                x: 0.5,
+                y: 0.5,
+                r: 0.8,
+                colorStops: [
+                  {
+                    offset: 0,
+                    color: "#61bba1", // 0% 处的颜色
+                  },
+                  {
+                    offset: 1,
+                    color: "#61bba1", // 100% 处的颜色
+                  },
+                ],
+                globalCoord: false, // 缺省为 false
+              },
+              shadowColor: "rgba(128, 217, 248, 1)", //文字块的背景阴影颜色
+              shadowOffsetX: -2,
+              shadowOffsetY: 2,
+              shadowBlur: 10,
+            },
+            // 鼠标放上去高亮的样式
+            emphasis: {
+              areaColor: "#addef8",
+              borderWidth: 0,
+            },
+          },
+        },
+      };
+
+      // 地图注册，第一个参数的名字必须和option.geo.map一致
+      echarts.registerMap("china", zhongguo);
+
+      myChart.setOption(option);
+    }
+
+    // 省市区编码
+    let bianma = [
+      {
+        name: "黑龙江省",
+        adcode: 230000,
+      },
+      {
+        name: "大兴安岭地区",
+        adcode: 232700,
+      },
+    ];
+
+    // 点击事件
+    myChart.on("click", (event) => {
+      // 是查找省级 还是查找市级
+      let code = null;
+      if (type == 0) {
+        // 市级存在
+        code = sheng;
+      } else if (type == 1) {
+        code = shi;
+      } else if (type == 2) {
+        code = qu;
+      }
+
+      // 查找到上一级的数组坐标
+      let num = code.features.findIndex(
+        (item) => item.properties.name == event.name
+      );
+
+      // 上一级地区的code码
+      let adcode = code.features[num].properties.adcode;
+
+      // 点击了文字。传值给后端
+      if (event.event.target.culling === false || type == 2) {
+        console.log(adcode);
+        /*
+          这里传值给后端  code = adcode
+        */
+        return;
+      }
+
+      // 获取地图
+      axios
+        .get(`https://geo.datav.aliyun.com/areas_v3/bound/${adcode}_full.json`)
+        .then((chinaJson) => {
+          if (type == 0) {
+            shi = chinaJson.data;
+          } else if (type == 1) {
+            qu = chinaJson.data;
+          }
+
+          // 缩放
+          option.geo.zoom = 0.8;
+          // 就像上面提到的，这里必须要和注册地图时的名字一致
+          option.geo.map = adcode;
+          // 注册地图
+          echarts.registerMap(adcode, chinaJson.data);
+          // 重新渲染
+          myChart.setOption(option, true);
+
+          // 当前地区等级
+          type++;
+        });
+    });
+
+    // 点击空白区域事件
+    myChart.getZr().on("click", function (event) {
+      // 没有 target 意味着鼠标/指针不在任何一个图形元素上，它是从“空白处”触发的。
+      if (!event.target) {
+        // 点击在了空白处，做些什么。
+        if (type == 0) {
+          // 如果在最顶级就返回不做操作
+          return;
+        }
+        // 存值
+        let data = null;
+        if (type == 2) {
+          // 当前是区级
+          qu = null;
+          data = shi;
+          option.geo.zoom = 0.8;
+        } else if (type == 1) {
+          shi = null;
+          data = sheng;
+          option.geo.zoom = 1;
+        }
+
+        // 就像上面提到的，这里必须要和注册地图时的名字一致
+        option.geo.map = "quyu";
+        // 注册地图
+        echarts.registerMap("quyu", data);
+        // 重新渲染
+        myChart.setOption(option, true);
+        // 当前地区等级
+        type--;
+      }
+    });
+  </script>
+</html>
